@@ -1,5 +1,18 @@
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
-export const AUTH_BASE = import.meta.env.VITE_AUTH_BASE_URL || 'http://localhost:3000';
+const DEPLOYED_BACKEND_URL = 'https://cloudvandana-z84a.onrender.com';
+
+function normalizeUrl(url) {
+  return url.replace(/\/$/, '');
+}
+
+export const API_BASE = normalizeUrl(
+  import.meta.env.VITE_API_BASE_URL ||
+    (import.meta.env.DEV ? '/api' : DEPLOYED_BACKEND_URL)
+);
+
+export const AUTH_BASE = normalizeUrl(
+  import.meta.env.VITE_AUTH_BASE_URL ||
+    (import.meta.env.DEV ? 'http://localhost:3000' : DEPLOYED_BACKEND_URL)
+);
 
 async function readError(response, fallbackMessage) {
   const text = await response.text();
@@ -20,7 +33,7 @@ export async function fetchValidationRules() {
     throw new Error(await readError(response, 'Failed to fetch validation rules'));
   }
 
-  return response.json();
+  return response.text();
 }
 
 export async function fetchAuthStatus() {
@@ -59,5 +72,5 @@ export async function updateValidationRule(id, active) {
     throw new Error(await readError(response, 'Failed to update validation rule'));
   }
 
-  return response.text();
+  return response.json();
 }
