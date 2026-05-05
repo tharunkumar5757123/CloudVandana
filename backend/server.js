@@ -7,12 +7,14 @@ const cors = require("cors");
 
 const app = express();
 
+// 🔴 REQUIRED FOR RENDER (VERY IMPORTANT)
+app.set("trust proxy", 1);
+
 // ✅ ENV CONFIG
 const PORT = process.env.PORT || 3001;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
-// 🔴 IMPORTANT: NO localhost fallback in production
 const REDIRECT_URI =
   process.env.REDIRECT_URI || "https://cloudvandana-z84a.onrender.com/callback";
 
@@ -34,15 +36,16 @@ app.use(
 
 app.use(express.json());
 
-// ✅ SESSION (fixed for production)
+// ✅ SESSION (FIXED FOR RENDER)
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "salesforce_secret",
     resave: false,
     saveUninitialized: false,
+    proxy: true, // 🔴 REQUIRED
     cookie: {
-      secure: true,       // 🔴 required for HTTPS (Render)
-      sameSite: "none",   // 🔴 required for cross-site cookies
+      secure: true,     // 🔴 HTTPS required
+      sameSite: "none", // 🔴 cross-origin required
     },
   })
 );
@@ -52,10 +55,7 @@ function salesforceErrorMessage(error, fallbackMessage) {
   const data = error.response?.data;
 
   if (Array.isArray(data) && data.length > 0) {
-    return data
-      .map((item) => item.message || item.errorCode)
-      .filter(Boolean)
-      .join("; ");
+    return data.map((item) => item.message || item.errorCode).join("; ");
   }
 
   if (data?.message) return data.message;
@@ -71,7 +71,7 @@ function salesforceAuthorizeUrl() {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI, // 🔴 CRITICAL
+    redirect_uri: REDIRECT_URI, // 🔴 MUST MATCH SALESFORCE
     scope: "api refresh_token",
   });
 
@@ -94,13 +94,11 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-// 🔍 Debug route (VERY useful)
+// 🔍 Debug
 app.get("/debug/oauth", (req, res) => {
   res.json({
     redirectUri: REDIRECT_URI,
     frontendUrl: FRONTEND_URL,
-    hasClientId: !!CLIENT_ID,
-    hasClientSecret: !!CLIENT_SECRET,
     authorizeUrl: salesforceAuthorizeUrl(),
   });
 });
@@ -127,9 +125,7 @@ app.get("/callback", async (req, res) => {
   const code = req.query.code;
 
   if (req.query.error) {
-    return res
-      .status(400)
-      .send(req.query.error_description || req.query.error);
+    return res.status(400).send(req.query.error_description || req.query.error);
   }
 
   if (!code) {
@@ -146,21 +142,24 @@ app.get("/callback", async (req, res) => {
           grant_type: "authorization_code",
           client_id: CLIENT_ID,
           client_secret: CLIENT_SECRET,
-          redirect_uri: REDIRECT_URI, // 🔴 MUST MATCH
+          redirect_uri: REDIRECT_URI,
           code,
         },
       }
     );
 
+    // ✅ Save session
     req.session.accessToken = response.data.access_token;
     req.session.instanceUrl = response.data.instance_url;
 
-    return res.redirect(FRONTEND_URL);
+    // 🔴 ENSURE SESSION SAVED BEFORE REDIRECT
+    req.session.save(() => {
+      res.redirect(FRONTEND_URL);
+    });
+
   } catch (error) {
     console.error(error.response?.data || error.message);
-    return res
-      .status(500)
-      .send("OAuth failed. Check callback URL and env variables.");
+    return res.status(500).send("OAuth failed");
   }
 });
 
