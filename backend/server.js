@@ -44,8 +44,8 @@ app.use(
     saveUninitialized: false,
     proxy: true, // 🔴 REQUIRED
     cookie: {
-      secure: true,     // 🔴 HTTPS required
-      sameSite: "none", // 🔴 cross-origin required
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     },
   })
 );
@@ -220,7 +220,7 @@ app.patch("/validation-rules/:id", async (req, res) => {
       }
     );
 
-    return res.json({ success: true });
+    return res.json({ Id: req.params.id, Active: active });
   } catch (error) {
     console.error(error.response?.data || error.message);
     return res.status(500).send("Error updating rule");

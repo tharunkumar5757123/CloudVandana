@@ -8,13 +8,13 @@ function normalizeUrl(url) {
 // API base (for normal API calls)
 export const API_BASE = normalizeUrl(
   import.meta.env.VITE_API_BASE_URL ||
-    (import.meta.env.DEV ? "http://localhost:3000" : DEPLOYED_BACKEND_URL)
+    (import.meta.env.DEV ? "http://localhost:3001" : DEPLOYED_BACKEND_URL)
 );
 
 // Auth base (for login redirect)
 export const AUTH_BASE = normalizeUrl(
   import.meta.env.VITE_AUTH_BASE_URL ||
-    (import.meta.env.DEV ? "http://localhost:3000" : DEPLOYED_BACKEND_URL)
+    (import.meta.env.DEV ? "http://localhost:3001" : DEPLOYED_BACKEND_URL)
 );
 
 // 🔐 Salesforce Login Redirect
