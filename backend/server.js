@@ -7,7 +7,7 @@ const cors = require("cors");
 
 const app = express();
 
-// 🔴 REQUIRED FOR RENDER (VERY IMPORTANT)
+// 🔴 REQUIRED FOR RENDER
 app.set("trust proxy", 1);
 
 // ✅ ENV CONFIG
@@ -26,23 +26,28 @@ const SALESFORCE_LOGIN_URL =
 
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 15000);
 
-// ✅ CORS
-app.use(
-  cors({
-    origin: FRONTEND_URL,
-    credentials: true,
-  })
-);
+// ✅ CORS CONFIG (UPDATED)
+const corsOptions = {
+  origin: FRONTEND_URL,
+  credentials: true,
+  methods: ["GET", "POST", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+};
+
+app.use(cors(corsOptions));
+
+// 🔴 VERY IMPORTANT (fixes "Failed to fetch")
+app.options("*", cors(corsOptions));
 
 app.use(express.json());
 
-// ✅ SESSION (FIXED FOR RENDER)
+// ✅ SESSION (PRODUCTION SAFE)
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "salesforce_secret",
     resave: false,
     saveUninitialized: false,
-    proxy: true, // 🔴 REQUIRED
+    proxy: true,
     cookie: {
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
@@ -51,18 +56,6 @@ app.use(
 );
 
 // 🔧 Helpers
-function salesforceErrorMessage(error, fallbackMessage) {
-  const data = error.response?.data;
-
-  if (Array.isArray(data) && data.length > 0) {
-    return data.map((item) => item.message || item.errorCode).join("; ");
-  }
-
-  if (data?.message) return data.message;
-
-  return error.message || fallbackMessage;
-}
-
 function toolingQuery(instanceUrl, soql) {
   return `${instanceUrl}/services/data/v60.0/tooling/query/?q=${encodeURIComponent(soql)}`;
 }
@@ -71,7 +64,7 @@ function salesforceAuthorizeUrl() {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI, // 🔴 MUST MATCH SALESFORCE
+    redirect_uri: REDIRECT_URI,
     scope: "api refresh_token",
   });
 
@@ -94,7 +87,6 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-// 🔍 Debug
 app.get("/debug/oauth", (req, res) => {
   res.json({
     redirectUri: REDIRECT_URI,
@@ -103,7 +95,6 @@ app.get("/debug/oauth", (req, res) => {
   });
 });
 
-// 🔐 Auth status
 app.get("/auth/status", (req, res) => {
   res.json({
     authenticated: !!req.session.accessToken,
@@ -113,10 +104,6 @@ app.get("/auth/status", (req, res) => {
 
 // 🔑 Login
 app.get("/login", (req, res) => {
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    return res.status(500).send("Salesforce OAuth not configured");
-  }
-
   return res.redirect(salesforceAuthorizeUrl());
 });
 
@@ -124,20 +111,13 @@ app.get("/login", (req, res) => {
 app.get("/callback", async (req, res) => {
   const code = req.query.code;
 
-  if (req.query.error) {
-    return res.status(400).send(req.query.error_description || req.query.error);
-  }
-
-  if (!code) {
-    return res.status(400).send("Missing authorization code");
-  }
+  if (!code) return res.status(400).send("Missing code");
 
   try {
     const response = await axios.post(
       `${SALESFORCE_LOGIN_URL}/services/oauth2/token`,
       null,
       {
-        timeout: REQUEST_TIMEOUT_MS,
         params: {
           grant_type: "authorization_code",
           client_id: CLIENT_ID,
@@ -148,18 +128,15 @@ app.get("/callback", async (req, res) => {
       }
     );
 
-    // ✅ Save session
     req.session.accessToken = response.data.access_token;
     req.session.instanceUrl = response.data.instance_url;
 
-    // 🔴 ENSURE SESSION SAVED BEFORE REDIRECT
     req.session.save(() => {
       res.redirect(FRONTEND_URL);
     });
-
   } catch (error) {
     console.error(error.response?.data || error.message);
-    return res.status(500).send("OAuth failed");
+    res.status(500).send("OAuth failed");
   }
 });
 
@@ -167,22 +144,18 @@ app.get("/callback", async (req, res) => {
 app.get("/validation-rules", async (req, res) => {
   const { accessToken, instanceUrl } = req.session;
 
-  if (!accessToken || !instanceUrl) {
-    return res.status(401).send("Not authenticated");
-  }
+  if (!accessToken) return res.status(401).send("Not authenticated");
 
   try {
     const response = await axios.get(
       toolingQuery(instanceUrl, "SELECT Id, ValidationName, Active FROM ValidationRule"),
-      {
-        headers: salesforceHeaders(accessToken),
-      }
+      { headers: salesforceHeaders(accessToken) }
     );
 
-    return res.json(response.data.records);
+    res.json(response.data.records);
   } catch (error) {
     console.error(error.response?.data || error.message);
-    return res.status(500).send("Error fetching rules");
+    res.status(500).send("Error fetching rules");
   }
 });
 
@@ -191,9 +164,7 @@ app.patch("/validation-rules/:id", async (req, res) => {
   const { accessToken, instanceUrl } = req.session;
   const { active } = req.body;
 
-  if (!accessToken || !instanceUrl) {
-    return res.status(401).send("Not authenticated");
-  }
+  if (!accessToken) return res.status(401).send("Not authenticated");
 
   try {
     const ruleResponse = await axios.get(
@@ -220,10 +191,10 @@ app.patch("/validation-rules/:id", async (req, res) => {
       }
     );
 
-    return res.json({ Id: req.params.id, Active: active });
+    res.json({ Id: req.params.id, Active: active });
   } catch (error) {
     console.error(error.response?.data || error.message);
-    return res.status(500).send("Error updating rule");
+    res.status(500).send("Error updating rule");
   }
 });
 
@@ -234,7 +205,7 @@ app.get("/logout", (req, res) => {
   });
 });
 
-// 🚀 Start server
+// 🚀 Start
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
