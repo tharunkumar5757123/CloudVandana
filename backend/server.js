@@ -6,7 +6,7 @@ const axios = require("axios");
 
 const app = express();
 
-// 🔴 REQUIRED FOR RENDER
+// 🔴 REQUIRED FOR RENDER (proxy + HTTPS cookies)
 app.set("trust proxy", 1);
 
 // ✅ ENV CONFIG
@@ -23,21 +23,22 @@ const FRONTEND_URL =
 const SALESFORCE_LOGIN_URL =
   process.env.SALESFORCE_LOGIN_URL || "https://login.salesforce.com";
 
-// 🔥 MANUAL CORS (FINAL FIX)
+// ✅ GLOBAL CORS FIX (robust)
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", FRONTEND_URL);
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header(
+  res.setHeader("Access-Control-Allow-Origin", FRONTEND_URL);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader(
     "Access-Control-Allow-Methods",
-    "GET,POST,PATCH,PUT,DELETE,OPTIONS"
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
   );
-  res.header(
+  res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization"
   );
 
+  // 🔥 Handle preflight properly
   if (req.method === "OPTIONS") {
-    return res.sendStatus(200); // ✅ preflight success
+    return res.status(204).end();
   }
 
   next();
@@ -45,7 +46,7 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// ✅ SESSION
+// ✅ SESSION (production-safe)
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "salesforce_secret",
@@ -53,8 +54,8 @@ app.use(
     saveUninitialized: false,
     proxy: true,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      secure: true,        // 🔴 ALWAYS true on Render (HTTPS)
+      sameSite: "none",    // 🔴 REQUIRED for cross-site cookies
     },
   })
 );
@@ -99,7 +100,7 @@ app.get("/auth/status", (req, res) => {
 
 // 🔑 Login
 app.get("/login", (req, res) => {
-  return res.redirect(salesforceAuthorizeUrl());
+  res.redirect(salesforceAuthorizeUrl());
 });
 
 // 🔁 Callback
@@ -126,9 +127,11 @@ app.get("/callback", async (req, res) => {
     req.session.accessToken = response.data.access_token;
     req.session.instanceUrl = response.data.instance_url;
 
+    // 🔴 VERY IMPORTANT
     req.session.save(() => {
       res.redirect(FRONTEND_URL);
     });
+
   } catch (error) {
     console.error(error.response?.data || error.message);
     res.status(500).send("OAuth failed");
@@ -139,11 +142,16 @@ app.get("/callback", async (req, res) => {
 app.get("/validation-rules", async (req, res) => {
   const { accessToken, instanceUrl } = req.session;
 
-  if (!accessToken) return res.status(401).send("Not authenticated");
+  if (!accessToken) {
+    return res.status(401).send("Not authenticated");
+  }
 
   try {
     const response = await axios.get(
-      toolingQuery(instanceUrl, "SELECT Id, ValidationName, Active FROM ValidationRule"),
+      toolingQuery(
+        instanceUrl,
+        "SELECT Id, ValidationName, Active FROM ValidationRule"
+      ),
       { headers: salesforceHeaders(accessToken) }
     );
 
@@ -159,7 +167,9 @@ app.patch("/validation-rules/:id", async (req, res) => {
   const { accessToken, instanceUrl } = req.session;
   const { active } = req.body;
 
-  if (!accessToken) return res.status(401).send("Not authenticated");
+  if (!accessToken) {
+    return res.status(401).send("Not authenticated");
+  }
 
   try {
     const ruleResponse = await axios.get(
@@ -186,7 +196,7 @@ app.patch("/validation-rules/:id", async (req, res) => {
       }
     );
 
-    res.json({ success: true });
+    res.json({ Id: req.params.id, Active: active });
   } catch (error) {
     console.error(error.response?.data || error.message);
     res.status(500).send("Error updating rule");
