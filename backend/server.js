@@ -3,7 +3,6 @@ require("dotenv").config();
 const express = require("express");
 const session = require("express-session");
 const axios = require("axios");
-const cors = require("cors");
 
 const app = express();
 
@@ -24,24 +23,29 @@ const FRONTEND_URL =
 const SALESFORCE_LOGIN_URL =
   process.env.SALESFORCE_LOGIN_URL || "https://login.salesforce.com";
 
-const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 15000);
+// 🔥 MANUAL CORS (FINAL FIX)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", FRONTEND_URL);
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PATCH,PUT,DELETE,OPTIONS"
+  );
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
 
-// ✅ CORS CONFIG (UPDATED)
-const corsOptions = {
-  origin: FRONTEND_URL,
-  credentials: true,
-  methods: ["GET", "POST", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
-};
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200); // ✅ preflight success
+  }
 
-app.use(cors(corsOptions));
-
-// 🔴 VERY IMPORTANT (fixes "Failed to fetch")
-app.options("*", cors(corsOptions));
+  next();
+});
 
 app.use(express.json());
 
-// ✅ SESSION (PRODUCTION SAFE)
+// ✅ SESSION
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "salesforce_secret",
@@ -87,18 +91,9 @@ app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/debug/oauth", (req, res) => {
-  res.json({
-    redirectUri: REDIRECT_URI,
-    frontendUrl: FRONTEND_URL,
-    authorizeUrl: salesforceAuthorizeUrl(),
-  });
-});
-
 app.get("/auth/status", (req, res) => {
   res.json({
     authenticated: !!req.session.accessToken,
-    instanceUrl: req.session.instanceUrl || null,
   });
 });
 
@@ -191,7 +186,7 @@ app.patch("/validation-rules/:id", async (req, res) => {
       }
     );
 
-    res.json({ Id: req.params.id, Active: active });
+    res.json({ success: true });
   } catch (error) {
     console.error(error.response?.data || error.message);
     res.status(500).send("Error updating rule");
